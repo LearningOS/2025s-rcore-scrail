@@ -27,8 +27,22 @@ mod process;
 use fs::*;
 use process::*;
 
+use crate::task::add_current_calls;
+
+/// To map syscall id to continue number
+pub const fn map_syscall(id:usize) -> usize {
+    match id {
+        SYSCALL_WRITE => 1,
+        SYSCALL_EXIT => 2,
+        SYSCALL_YIELD => 3,
+        SYSCALL_GET_TIME => 4,
+        SYSCALL_TRACE => 5,
+        _ => panic!("Unsupported syscall_id"),
+    }
+}
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
+    add_current_calls(syscall_id);
     match syscall_id {
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
         SYSCALL_EXIT => sys_exit(args[0] as i32),

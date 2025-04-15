@@ -17,12 +17,15 @@ mod task;
 use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::syscall::map_syscall;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
 
+/// The predict max syscall number, to create syscall counting list
+pub const MAX_SYSCALL_NUM:usize = 50;
 /// The task manager, where all the tasks are managed.
 ///
 /// Functions implemented on `TaskManager` deals with all task state transitions
@@ -54,6 +57,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            task_syscall_count: [0; MAX_SYSCALL_NUM]
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -135,6 +139,22 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// Add 1 call count of `syscall_id` for the current task 
+    fn add_current_calls(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_syscall_count[syscall_id] += 1;
+        // println!("current call {} on {}", inner.tasks[current].task_syscall_count[syscall_id], syscall_id);
+    }
+
+    /// Get the call count of `syscall_id` for the current task
+    fn count_current_calls(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let call_list = inner.tasks[current].task_syscall_count;
+        call_list[syscall_id]
+    }
 }
 
 /// Run the first task in task list.
@@ -168,4 +188,24 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// Read `addr` on current task and returen the read `usize` value
+pub fn read_task_byte(addr: *const u8) -> usize {
+    unsafe {*addr as usize}
+}
+
+/// Write `data` on `addr` on current task
+pub fn write_task_byte(addr: *mut u8, data: u8) {
+    unsafe {*addr = data;}
+}
+
+/// Count `syscall_id` of current task
+pub fn count_current_calls(syscall_id: usize) -> usize {
+    TASK_MANAGER.count_current_calls(map_syscall(syscall_id))
+}
+
+/// Add 1 to current task on `syscall_id`
+pub fn add_current_calls(syscall_id:usize) {
+    TASK_MANAGER.add_current_calls(map_syscall(syscall_id));
 }
